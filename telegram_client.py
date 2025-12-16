@@ -4,6 +4,7 @@ import os
 import requests
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 load_dotenv()
@@ -16,8 +17,9 @@ WEBHOOK_URL = "https://primary-production-f837.up.railway.app/webhook/telegram-j
 CHANNELS = [
     "EastMed Mobile Release",
 ]
-
-client = TelegramClient("session_name", api_id, api_hash)
+session_str = os.getenv("TG_SESSION")
+client = TelegramClient(StringSession(session_str), api_id, api_hash)
+# client = TelegramClient("session_name", api_id, api_hash)
 
 
 async def serialize_message(msg):
