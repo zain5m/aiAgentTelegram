@@ -1,30 +1,83 @@
+import base64
 import os
 
+import requests
+from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
-api_id = os.environ["API_ID"]
-api_hash = os.environ["API_HASH"]
+load_dotenv()
 
-# اسم ملف الجلسة – هو اللي بيمثّل تسجيل دخول حسابك
+api_id = int(os.getenv("API_ID"))
+api_hash = os.getenv("API_HASH")
+
+WEBHOOK_URL = "https://primary-production-f837.up.railway.app/webhook/telegram-jobs"
+
+CHANNELS = [
+    "EastMed Mobile Release",
+]
+
 client = TelegramClient("session_name", api_id, api_hash)
 
-# THIS FOR CRATE SESSION
-# async def main():
-#     me = await client.get_me()
-#     print("Logged in as:", me.username)
+
+async def serialize_message(msg):
+    data = {
+        "message_id": msg.id,
+        "date": msg.date.isoformat(),
+        "text": msg.text or "",
+        "views": msg.views,
+        "channel_id": msg.peer_id.channel_id if msg.peer_id else None,
+        "media": [],
+    }
+
+    if isinstance(msg.media, MessageMediaPhoto):
+        file_bytes = await client.download_media(msg, file=bytes)
+        data["media"].append(
+            {
+                "type": "photo",
+                "mime": "image/jpeg",
+                "base64": base64.b64encode(file_bytes).decode(),
+            }
+        )
+
+    elif isinstance(msg.media, MessageMediaDocument):
+        doc = msg.media.document
+        file_bytes = await client.download_media(msg, file=bytes)
+
+        file_name = None
+        for attr in doc.attributes:
+            if hasattr(attr, "file_name"):
+                file_name = attr.file_name
+
+        data["media"].append(
+            {
+                "type": "document",
+                "mime": doc.mime_type,
+                "size": doc.size,
+                "file_name": file_name,
+                "base64": base64.b64encode(file_bytes).decode(),
+            }
+        )
+
+    return data
 
 
-# client.start()
-# client.loop.run_until_complete(main())
-# -- TODO:
+@client.on(events.NewMessage(chats=CHANNELS))
+async def handler(event):
+    msg = event.message
+    payload = await serialize_message(msg)
 
-# @client.on(events.NewMessage)
-# async def handler(event):
-#     if event.is_channel:  # فقط القنوات
-#         print("New message from channel:")
-#         print("Channel:", event.chat.title)
-#         print("Message:", event.message.message)
+    try:
+        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        print("Sent to n8n:", r.status_code)
+    except Exception as e:
+        print("Failed to send:", e)
 
 
-# client.start()
-# client.run_until_disconnected()
+async def main():
+    print("🚀 Listening to Telegram channels...")
+    await client.run_until_disconnected()
+
+
+client.start()
+client.loop.run_until_complete(main())
