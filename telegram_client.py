@@ -15,7 +15,8 @@ api_hash = os.getenv("API_HASH")
 WEBHOOK_URL = "https://primary-production-f837.up.railway.app/webhook/telegram-jobs"
 
 CHANNELS = [
-    "EastMed Mobile Release",
+    # "EastMed Mobile Release",
+    "@EastMedMobileRelease"
 ]
 session_str = os.getenv("TG_SESSION")
 client = TelegramClient(StringSession(session_str), api_id, api_hash)
