@@ -12,28 +12,40 @@ load_dotenv()
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
 
-WEBHOOK_URL = "https://primary-production-f837.up.railway.app/webhook/telegram-jobs"
+WEBHOOK_URL = os.getenv("URL")
+
 
 CHANNELS = [
-    # "EastMed Mobile Release",
-    # "@EastMedMobileRelease"
-    -1003394865233  # EastMed Mobile Release this for test
+    "EastMed Mobile Release",
+    "@wazifnico",
+    "@RemoteOnlineWork",
+    "@saudijobscom",
+    "@profinder_sy",
+    "@jobs963",
+    "@teleworksjobs",
+    "@ExtraJobs",
+    "@MGLNaJ",
+    "@damasjob",
+    "@tawasolsyria",
 ]
+
 session_str = os.getenv("TG_SESSION")
 client = TelegramClient(StringSession(session_str), api_id, api_hash)
-# client = TelegramClient("session_name", api_id, api_hash)
+
+resolved_channels = {}
 
 
-async def serialize_message(msg):
+async def serialize_message(msg, channel):
     data = {
         "message_id": msg.id,
         "date": msg.date.isoformat(),
-        "text": msg.text or "",
+        "text": msg.message or "",
+        "caption": getattr(msg, "caption", ""),
         "views": msg.views,
-        "channel_id": msg.peer_id.channel_id if msg.peer_id else None,
+        "channel_id": channel.id,
+        "channel_username": channel.username,
         "media": [],
     }
-
     if isinstance(msg.media, MessageMediaPhoto):
         file_bytes = await client.download_media(msg, file=bytes)
         data["media"].append(
@@ -66,20 +78,54 @@ async def serialize_message(msg):
     return data
 
 
-@client.on(events.NewMessage(chats=CHANNELS))
+async def resolve_channels(client, channels):
+    resolved = {}
+
+    async for dialog in client.iter_dialogs():
+        if not dialog.is_channel:
+            continue
+
+        name = dialog.name
+        username = f"@{dialog.entity.username}" if dialog.entity.username else None
+
+        for ch in channels:
+            if ch == name or ch == username:
+                resolved[dialog.id] = dialog.entity
+
+    return resolved
+
+
+# @client.on(events.NewMessage(chats=CHANNELS))
+@client.on(events.NewMessage)
 async def handler(event):
+    channel = resolved_channels.get(event.chat_id)
+    if not channel:
+        return
+
     msg = event.message
-    payload = await serialize_message(msg)
+    payload = await serialize_message(msg, channel)
 
     try:
         r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
-        print("Sent to n8n:", r.status_code)
+        print(f"Sent {msg.id} from @{channel.username}")
     except Exception as e:
         print("Failed to send:", e)
 
 
 async def main():
-    print("🚀 Listening to Telegram channels...")
+    global resolved_channels
+
+    print("🔎 Resolving channels...")
+    resolved_channels = await resolve_channels(client, CHANNELS)
+
+    if not resolved_channels:
+        print("❌ No channels resolved. Are you a member?")
+        return
+
+    print("✅ Listening to channels:")
+    for cid, ch in resolved_channels.items():
+        print(f"  {ch.title} ({ch.username}) → {cid}")
+
     await client.run_until_disconnected()
 
 
