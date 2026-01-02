@@ -27,6 +27,12 @@ CHANNELS = [
     "@MGLNaJ",
     "@damasjob",
     "@tawasolsyria",
+    "@careerguidesy",
+    "@jodfreelancer",
+    "@wazfni2025",
+    "@tawzeefy",
+    "@recjobs",
+    "@pgfow",
 ]
 
 WEBHOOK_URL = os.getenv("URL")

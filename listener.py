@@ -27,7 +27,14 @@ CHANNELS = [
     "@MGLNaJ",
     "@damasjob",
     "@tawasolsyria",
+    "@careerguidesy",
+    "@jodfreelancer",
+    "@wazfni2025",
+    "@tawzeefy",
+    "@recjobs",
+    "@pgfow",
 ]
+
 
 session_str = os.getenv("TG_SESSION")
 client = TelegramClient(StringSession(session_str), api_id, api_hash)
