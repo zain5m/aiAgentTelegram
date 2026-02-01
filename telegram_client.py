@@ -1,6 +1,8 @@
+import asyncio
 import base64
 import json
 import os
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -38,6 +40,47 @@ CHANNELS = [
 WEBHOOK_URL = os.getenv("URL")
 
 STATE_FILE = "read_state.json"
+FAILED_MESSAGES_FILE = "failed_messages.json"
+
+
+def save_failed_message(msg, channel, payload, error):
+    record = {
+        "message_id": msg.id,
+        "channel_id": channel.id,
+        "channel_username": channel.username,
+        "channel_title": channel.title,
+        "payload_size": len(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+        "error": str(error),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    if os.path.exists(FAILED_MESSAGES_FILE):
+        with open(FAILED_MESSAGES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = []
+
+    data.append(record)
+
+    with open(FAILED_MESSAGES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+async def send_with_retry(session, payload, msg, channel, retries=3, delay=2):
+    for attempt in range(1, retries + 1):
+        try:
+            r = session.post(WEBHOOK_URL, json=payload, timeout=15)
+            r.raise_for_status()
+            return True
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt} failed for msg {msg.id}: {e}")
+
+            if attempt < retries:
+                await asyncio.sleep(delay)
+            else:
+                print(f"❌ Permanent failure msg {msg.id}")
+                save_failed_message(msg, channel, payload, e)
+                return False
 
 
 # ────────────────────────────────────────────
@@ -226,20 +269,27 @@ async def check_unread_channel(channel_username, state):
         print(f"[{idx}/{total}] Sending message {msg.id}")
 
         payload = await serialize_message(msg, channel)
+        success = await send_with_retry(session, payload, msg, channel)
 
-        try:
-            response = session.post(WEBHOOK_URL, json=payload, timeout=15)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            print(f"❌ STOPPED at message {msg.id}")
-            print("Reason:", e)
-            debug_payload(msg, payload, channel_username)
-            print_failed_message(msg, payload, channel_username)
-            # return
+        if success:
+            state[str(channel.id)] = msg.id
+            save_state(state)
+            print(f"✅ Sent & saved message {msg.id}")
+        else:
+            print(f"⏭ Skipped saving state for failed msg {msg.id}")
+        # try:
+        #     response = session.post(WEBHOOK_URL, json=payload, timeout=15)
+        #     response.raise_for_status()
+        # except requests.exceptions.RequestException as e:
+        #     print(f"❌ STOPPED at message {msg.id}")
+        #     print("Reason:", e)
+        #     debug_payload(msg, payload, channel_username)
+        #     print_failed_message(msg, payload, channel_username)
+        #     # return
 
-        # ✅ نجاح → نحفظ فورًا في الملف
-        state[str(channel.id)] = msg.id
-        save_state(state)
+        # # ✅ نجاح → نحفظ فورًا في الملف
+        # state[str(channel.id)] = msg.id
+        # save_state(state)
 
         print(f"→ Sent & saved message {msg.id}")
 

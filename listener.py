@@ -1,5 +1,8 @@
+import asyncio
 import base64
+import json
 import os
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -13,6 +16,8 @@ api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
 
 WEBHOOK_URL = os.getenv("URL")
+FAILED_MESSAGES_FILE = "failed_messages_listener.json"
+session_str = os.getenv("TG_SESSION")
 
 
 CHANNELS = [
@@ -36,10 +41,53 @@ CHANNELS = [
 ]
 
 
-session_str = os.getenv("TG_SESSION")
 client = TelegramClient(StringSession(session_str), api_id, api_hash)
 
 resolved_channels = {}
+
+
+def save_failed_message(message_id, channel, error):
+    record = {
+        "message_id": message_id,
+        "channel_id": channel.id,
+        "channel_username": channel.username,
+        "channel_title": channel.title,
+        "error": str(error),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    if os.path.exists(FAILED_MESSAGES_FILE):
+        with open(FAILED_MESSAGES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = []
+
+    data.append(record)
+
+    with open(FAILED_MESSAGES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+async def send_with_retry(payload, msg, channel, retries=3, delay=2):
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+
+            if r.status_code >= 200 and r.status_code < 300:
+                print(f"✅ Sent {msg.id} from @{channel.username}")
+                return True
+            else:
+                raise Exception(f"HTTP {r.status_code}")
+
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt} failed for {msg.id}: {e}")
+
+            if attempt < retries:
+                await asyncio.sleep(delay)
+            else:
+                print(f"❌ Failed permanently: {msg.id} from @{channel.username}")
+                save_failed_message(msg.id, channel, e)
+                return False
 
 
 async def serialize_message(msg, channel):
@@ -112,11 +160,12 @@ async def handler(event):
     msg = event.message
     payload = await serialize_message(msg, channel)
 
-    try:
-        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
-        print(f"Sent {msg.id} from @{channel.username}")
-    except Exception as e:
-        print("Failed to send:", e)
+    await send_with_retry(payload, msg, channel)
+    # try:
+    #     r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    #     print(f"Sent {msg.id} from @{channel.username}")
+    # except Exception as e:
+    #     print("Failed to send:", e)
 
 
 async def main():
@@ -136,5 +185,11 @@ async def main():
     await client.run_until_disconnected()
 
 
-client.start()
-client.loop.run_until_complete(main())
+# client.start()
+# client.loop.run_until_complete(main())
+
+
+async def start_listener():
+    print("🚀 Telegram listener starting...")
+    await client.start()
+    await main()
